@@ -129,7 +129,7 @@
     "@types/express-session": "1.18.2",
     "@types/js-yaml": "^4.0.9",
     "@types/lodash": "4.17.24",
-    "@types/mime": "^3.0.4",
+    "@types/mime": "^4.0.0",
     "@types/node": "22.19.0",
     "@types/node-schedule": "2.1.8",
     "@types/nodemailer": "^8.0.0",

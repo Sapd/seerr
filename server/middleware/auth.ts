@@ -55,43 +55,34 @@ export const checkUser: Middleware = async (req, _res, next) => {
     const userValue = (hasUserHeader && req.header(userHeader)) ?? '';
     const emailValue = (hasEmailHeader && req.header(emailHeader)) ?? '';
 
-    let query: object[] = [];
+    // Match case-insensitively. Jellyfin's AuthenticateByName lowercases the
+    // username before storing (so `jellyfinUsername` is `tina`), while most
+    // IDPs preserve the original case in property mappings (`Tina`). Without
+    // this, every fresh deploy needs either per-user DB fix-ups or a manual
+    // lowercasing expression in the IDP — surprising in both cases.
+    const qb = userRepository.createQueryBuilder('user');
 
-    if (hasUserHeader && hasEmailHeader) {
-      if (emailValue !== '' && userValue !== '') {
-        // email & user header was specified so we must verify both
-        query = [
-          {
-            jellyfinUsername: userValue,
-            email: emailValue,
-          },
-          {
-            plexUsername: userValue,
-            email: emailValue,
-          },
-        ];
-      }
+    if (
+      hasUserHeader &&
+      hasEmailHeader &&
+      userValue !== '' &&
+      emailValue !== ''
+    ) {
+      // email & user header was specified so we must verify both
+      qb.where(
+        '(LOWER(user.jellyfinUsername) = LOWER(:user) OR LOWER(user.plexUsername) = LOWER(:user)) AND LOWER(user.email) = LOWER(:email)',
+        { user: userValue, email: emailValue }
+      );
+      user = await qb.getOne();
     } else if (hasUserHeader && userValue !== '') {
-      query = [
-        {
-          jellyfinUsername: userValue,
-        },
-        {
-          plexUsername: userValue,
-        },
-      ];
+      qb.where(
+        'LOWER(user.jellyfinUsername) = LOWER(:user) OR LOWER(user.plexUsername) = LOWER(:user)',
+        { user: userValue }
+      );
+      user = await qb.getOne();
     } else if (hasEmailHeader && emailValue !== '') {
-      query = [
-        {
-          email: emailValue,
-        },
-      ];
-    }
-
-    if (query.length > 0) {
-      user = await userRepository.findOne({
-        where: query,
-      });
+      qb.where('LOWER(user.email) = LOWER(:email)', { email: emailValue });
+      user = await qb.getOne();
     }
   }
   if (user) {

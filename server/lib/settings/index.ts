@@ -195,6 +195,13 @@ export interface ForwardAuthSettings {
   enabled: boolean;
   userHeader: string;
   emailHeader: string;
+  /**
+   * When true, an authenticated request whose forward-auth user/email
+   * doesn't match an existing user will create a new user record on the
+   * fly with the default permission set. Defaults to false so existing
+   * deploys keep their explicit-import behaviour.
+   */
+  autoProvision: boolean;
 }
 
 interface PublicSettings {
@@ -629,6 +636,7 @@ class Settings {
           enabled: false,
           userHeader: '',
           emailHeader: '',
+          autoProvision: false,
         },
         proxy: {
           enabled: false,

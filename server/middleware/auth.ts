@@ -1,5 +1,8 @@
+import { MediaServerType } from '@server/constants/server';
+import { UserType } from '@server/constants/user';
 import { getRepository } from '@server/datasource';
 import { User } from '@server/entity/User';
+import logger from '@server/logger';
 import type {
   Permission,
   PermissionCheckOptions,
@@ -83,6 +86,59 @@ export const checkUser: Middleware = async (req, _res, next) => {
     } else if (hasEmailHeader && emailValue !== '') {
       qb.where('LOWER(user.email) = LOWER(:email)', { email: emailValue });
       user = await qb.getOne();
+    }
+
+    // Auto-provision: if forward-auth identifies a new user that isn't in the
+    // DB, create one on the fly with the default permission set. Opt-in so
+    // existing deploys are unaffected. The userType matches whichever media
+    // server is configured (Plex/Jellyfin/Emby) so existing per-userType
+    // logic (avatars, server-specific UI) keeps working; falls back to
+    // LOCAL when no media server is configured.
+    if (
+      !user &&
+      settings.network.forwardAuth.autoProvision &&
+      hasUserHeader &&
+      userValue
+    ) {
+      const mediaServerType = settings.main.mediaServerType;
+      const newUserType =
+        mediaServerType === MediaServerType.PLEX
+          ? UserType.PLEX
+          : mediaServerType === MediaServerType.JELLYFIN
+          ? UserType.JELLYFIN
+          : mediaServerType === MediaServerType.EMBY
+          ? UserType.EMBY
+          : UserType.LOCAL;
+
+      try {
+        user = new User({
+          // Email is required NOT NULL — synthesise a stable placeholder when
+          // the IDP doesn't provide one. Admin can edit it afterwards.
+          email: emailValue || `${userValue}@forward-auth.local`,
+          plexUsername:
+            newUserType === UserType.PLEX ? userValue : undefined,
+          jellyfinUsername:
+            newUserType === UserType.JELLYFIN ||
+            newUserType === UserType.EMBY
+              ? userValue
+              : undefined,
+          permissions: settings.main.defaultPermissions,
+          userType: newUserType,
+          // Required NOT NULL column; resolved client-side via Gravatar/avatarproxy.
+          avatar: '',
+        });
+        await userRepository.save(user);
+        logger.info(
+          `Auto-provisioned user via forward-auth: ${userValue}`,
+          { label: 'Auth', userId: user.id, userType: newUserType }
+        );
+      } catch (e) {
+        logger.error(
+          `Failed to auto-provision forward-auth user ${userValue}`,
+          { label: 'Auth', errorMessage: (e as Error).message }
+        );
+        user = null;
+      }
     }
   }
   if (user) {

@@ -17,18 +17,19 @@ export const checkUser: Middleware = async (req, _res, next) => {
   const userRepository = getRepository(User);
   let trustedProxy = false;
 
-  // Check if the remoteSocketAddress we received the request
-  // from is trusted!
-  const socketAddress = req.socket.remoteAddress || '';
+  // Check if the IP we received the request from is trusted.
+  // Use req.ip which is set by the proxy-aware middleware (handles X-Forwarded-For, etc.)
+  // rather than req.socket.remoteAddress which is always the direct connection (localhost in Docker)
+  const clientIp = req.ip || '';
 
-  if (net.isIPv4(socketAddress)) {
+  if (net.isIPv4(clientIp)) {
     trustedProxy =
-      socketAddress === '127.0.0.1' ||
-      settings.network.trustedProxies.v4.includes(socketAddress);
-  } else if (net.isIPv6(socketAddress)) {
+      clientIp === '127.0.0.1' ||
+      settings.network.trustedProxies.v4.includes(clientIp);
+  } else if (net.isIPv6(clientIp)) {
     trustedProxy =
-      socketAddress === '::1' ||
-      settings.network.trustedProxies.v6.includes(socketAddress);
+      clientIp === '::1' ||
+      settings.network.trustedProxies.v6.includes(clientIp);
   }
 
   if (req.header('X-API-Key') === settings.main.apiKey) {

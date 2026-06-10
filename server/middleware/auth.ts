@@ -20,12 +20,12 @@ export const checkUser: Middleware = async (req, _res, next) => {
   // Check if the remoteSocketAddress we received the request
   // from is trusted!
   const socketAddress = req.socket.remoteAddress || '';
-  const ipv4_sanitized_socketAddress = socketAddress.replace(/^::ffff:/, '');
+  const ipv4_normalized_socketAddress = socketAddress.replace(/^::ffff:/, '');
   
-  if (net.isIPv4(ipv4_sanitized_socketAddress)) {
+  if (net.isIPv4(ipv4_normalized_socketAddress)) {
     trustedProxy =
-      ipv4_sanitized_socketAddress === '127.0.0.1' ||
-      settings.network.trustedProxies.v4.includes(ipv4_sanitized_socketAddress);
+      ipv4_normalized_socketAddress === '127.0.0.1' ||
+      settings.network.trustedProxies.v4.includes(ipv4_normalized_socketAddress);
   } else if (net.isIPv6(socketAddress)) {
     trustedProxy =
       socketAddress === '::1' ||

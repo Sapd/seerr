@@ -21,7 +21,7 @@ export const checkUser: Middleware = async (req, _res, next) => {
   // from is trusted!
   const socketAddress = req.socket.remoteAddress || '';
   const ipv4_normalized_socketAddress = socketAddress.replace(/^::ffff:/, '');
-  
+
   if (net.isIPv4(ipv4_normalized_socketAddress)) {
     trustedProxy =
       ipv4_normalized_socketAddress === '127.0.0.1' ||
@@ -95,34 +95,50 @@ export const checkUser: Middleware = async (req, _res, next) => {
     // server is configured (Plex/Jellyfin/Emby) so existing per-userType
     // logic (avatars, server-specific UI) keeps working; falls back to
     // LOCAL when no media server is configured.
+    // Derive a username for provisioning. Prefer the user header when present,
+    // otherwise fall back to the local-part of the email (everything before
+    // '@'). This lets email-only setups (e.g. Cloudflare Access, which only
+    // supplies Cf-Access-Authenticated-User-Email) provision a usable account.
+    const emailLocalPart = emailValue ? emailValue.split('@')[0] : '';
+    const provisionUsername = userValue || emailLocalPart;
     if (
       !user &&
       settings.network.forwardAuth.autoProvision &&
-      hasUserHeader &&
-      userValue
+      provisionUsername
     ) {
       const mediaServerType = settings.main.mediaServerType;
       const newUserType =
         mediaServerType === MediaServerType.PLEX
           ? UserType.PLEX
           : mediaServerType === MediaServerType.JELLYFIN
-          ? UserType.JELLYFIN
-          : mediaServerType === MediaServerType.EMBY
-          ? UserType.EMBY
-          : UserType.LOCAL;
+            ? UserType.JELLYFIN
+            : mediaServerType === MediaServerType.EMBY
+              ? UserType.EMBY
+              : UserType.LOCAL;
 
       try {
         user = new User({
           // Email is required NOT NULL — synthesise a stable placeholder when
           // the IDP doesn't provide one. Admin can edit it afterwards.
           email: emailValue || `${userValue}@forward-auth.local`,
+          // Only populate the media-server username columns when an actual
+          // user header was supplied — those are matched against the real
+          // Plex/Jellyfin/Emby account on subsequent requests, so we must not
+          // fill them with a guessed value derived from the email.
           plexUsername:
-            newUserType === UserType.PLEX ? userValue : undefined,
+            newUserType === UserType.PLEX && userValue ? userValue : undefined,
           jellyfinUsername:
-            newUserType === UserType.JELLYFIN ||
-            newUserType === UserType.EMBY
+            (newUserType === UserType.JELLYFIN ||
+              newUserType === UserType.EMBY) &&
+              userValue
               ? userValue
               : undefined,
+          // When the User Header is blank (email-only auth, e.g. Cloudflare
+          // Access), use the local-part of the email as the username — this
+          // drives `displayName` (see the User entity's @AfterLoad). When a
+          // user header is present, leave this unset so media-server accounts
+          // keep displaying via plex/jellyfinUsername as before.
+          username: userValue ? undefined : emailLocalPart,
           permissions: settings.main.defaultPermissions,
           userType: newUserType,
           // Required NOT NULL column; resolved client-side via Gravatar/avatarproxy.
@@ -130,12 +146,12 @@ export const checkUser: Middleware = async (req, _res, next) => {
         });
         await userRepository.save(user);
         logger.info(
-          `Auto-provisioned user via forward-auth: ${userValue}`,
+          `Auto-provisioned user via forward-auth: ${provisionUsername}`,
           { label: 'Auth', userId: user.id, userType: newUserType }
         );
       } catch (e) {
         logger.error(
-          `Failed to auto-provision forward-auth user ${userValue}`,
+          `Failed to auto-provision forward-auth user ${provisionUsername}`,
           { label: 'Auth', errorMessage: (e as Error).message }
         );
         user = null;
